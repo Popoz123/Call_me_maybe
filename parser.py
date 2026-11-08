@@ -76,14 +76,14 @@ class InputParser(BaseModel):
         return res
 
 
-# if __name__ == "__main__":
-#     obj = InputParser()
-#     try:
-#         obj.parse_prompts(sys.argv[2])
-#         obj.parse_defs(sys.argv[1])
-#     except (OSError, ValueError) as e:
-#         print(e)
-#         exit()
-#     ls = obj.format_input()
-#     for lp in ls:
-#         print(lp)
+if __name__ == "__main__":
+    obj = InputParser()
+    try:
+        obj.parse_prompts(sys.argv[2])
+        obj.parse_defs(sys.argv[1])
+    except (OSError, ValueError) as e:
+        print(e)
+        exit()
+    ls = obj.format_input()
+    for lp in ls:
+        print(lp)
