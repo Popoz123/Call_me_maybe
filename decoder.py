@@ -16,6 +16,7 @@ class Decoder(BaseModel):
     token_to_id: dict[str, int] = Field(default_factory=dict)
     id_to_token: dict[int, str] = Field(default_factory=dict)
     number_t: set[int] = Field(default_factory=set)
+    string_t: set[int] = Field(default_factory=set)
 
     def model_post_init(self, __context: Any) -> None:
         if self.llm is None:
@@ -26,7 +27,7 @@ class Decoder(BaseModel):
     def _is_num_t(t_str: str) -> bool:
         s = t_str.strip()
         if not s:
-            return false
+            return False
         return all(c in "0123456789.-" for c in s)
 
     def _load_vocab(self) -> None:
@@ -44,7 +45,11 @@ class Decoder(BaseModel):
         for t_id, t_str in self.id_to_token.items():
             if self._is_num_t(t_str):
                 self.number_t.add(t_id)
-                
+        
+        self.string_t = {
+            t_id for t_id, t_str in self.id_to_token.items() if "\n" not in t_str
+        }
+
 
     def get_fn_name(self, funcs: list[FuncDef],
                     prompt: str) -> tuple[FuncDef, list[int]]:
@@ -71,25 +76,65 @@ class Decoder(BaseModel):
         return (candidates[0][0], c_input_ids)
 
     def get_params(self, func: FuncDef, input_ids: list[int]) -> list[int]:
+        true_t: list[int] = self.llm.encode("true")[0].tolist()
+        false_t: list[int] = self.llm.encode("false")[0].tolist()
+        comma_d: int = self.llm.encode(",")[0][0].item()
+        brace_d: int = self.llm.encode("}")[0][0].item()
+        quote_d: int = self.llm.encode('"')[0][0].item()
+        brace_flag: bool = True
+        
         for i, (p_name, p_type) in enumerate(func.parameters.items()):
             prefix = f'"{p_name}": ' if i == 0 else f', "{p_name}": '
             input_ids += self.llm.encode(prefix)[0].tolist()
             
-            true_t: int = self.llm.encode("true")[0][0].item()
-            false_t: int = self.llm.encode("false")[0][0].item()
-            flag: bool = True
             best_token: int
-            while flag:
-                logits: list[float] =-self.get_logits_from_input_ids(input_ids)
-                
-                if p_type == "boolean":
-                    if logits[true_t] > logits[false_t]:
-                        best_token = true_t
-                    else:
-                        best_token = false_t
-                
+
+            if p_type.type == "boolean":
+                brace_flag = True
+                logits: list[float] = self.llm.get_logits_from_input_ids(input_ids)
+                if logits[true_t[0]] > logits[false_t[0]]:
+                    input_ids += true_t
+                else:
+                    input_ids += false_t
+
+            elif p_type.type in ("number", "integer"):
+                flag: bool = True
+                is_last: bool = (i == len(func.parameters) - 1)
+                ex_delim: int = brace_d if is_last else comma_d
+
+                logits: list[float] = self.llm.get_logits_from_input_ids(input_ids)
+                best_token = max(self.number_t, key=lambda t: logits[t])
                 input_ids.append(best_token)
 
+                while flag:
+                    logits = self.llm.get_logits_from_input_ids(input_ids)
+                    best_token = max(self.number_t | {ex_delim}, key=lambda t: logits[t])
+                    if best_token != ex_delim:
+                        input_ids.append(best_token)
+                    else:
+                        if ex_delim == brace_d:
+                            brace_flag = True
+                        else:
+                            brace_flag = False
+                        flag = False
+                
+            
+            else:
+                flag: bool = True
+                brace_flag = True
+                input_ids.append(quote_d)
+
+                while flag:
+                    logits = self.llm.get_logits_from_input_ids(input_ids)
+                    best_token = max(self.string_t, key=lambda t: logits[t])
+                    input_ids.append(best_token)
+                    if best_token == quote_d:
+                        break
+            if brace_flag:
+                input_ids.append(brace_d)
+
+        return input_ids
+                
 
 if __name__ == "__main__":
     obj = InputParser()
@@ -101,6 +146,7 @@ if __name__ == "__main__":
         exit()
     ls = obj.format_input()
     dcl = Decoder()
-    name = dcl.get_fn_name(obj.functions, ls[0])
-    print(name[0].name)
-    print(dcl.llm.decode(name[1]))
+    name = dcl.get_fn_name(obj.functions, ls[1])
+    res = dcl.get_params(name[0], name[1])
+#    print(name[0].name)
+    print(dcl.llm.decode(res))
