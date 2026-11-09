@@ -71,7 +71,7 @@ class InputParser(BaseModel):
             p2: str = f"User prompt: {prompt.prompt}\n"
             x: str = json.dumps(prompt.prompt)
             p2 += f'JSON output:{{"prompt": {x}, "name": "'
-            res.append(f"{p1}\n{p2}\n")
+            res.append(f"{p1}\n{p2}")
 
         return res
 
