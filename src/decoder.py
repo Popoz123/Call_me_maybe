@@ -129,6 +129,7 @@ class Decoder(BaseModel):
         if not self.visualize:
             return
 
+        assert self.llm is not None
         if isinstance(data, int):
             text = self.llm.decode([data])
         elif isinstance(data, list):
